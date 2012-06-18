@@ -5,10 +5,15 @@
 #include <highgui.h>
 #include <boost/make_shared.hpp>
 
+#include "compressed_image_transport/compression_common.h"
+
 #include <vector>
+#include <sstream>
 
 using namespace cv;
 using namespace std;
+
+namespace enc = sensor_msgs::image_encodings;
 
 namespace compressed_image_transport
 {
@@ -37,158 +42,136 @@ void CompressedPublisher::publish(const sensor_msgs::Image& message, const Publi
   // Compressed image message
   sensor_msgs::CompressedImage compressed;
   compressed.header = message.header;
-  compressed.format = config_.format;
+  compressed.format = message.encoding;
 
   // Compression settings
   std::vector<int> params;
   params.resize(3, 0);
 
+  // Get codec configuration
+  compressionFormat encodingFormat = UNDEFINED;
   if (config_.format == "jpeg")
+    encodingFormat = JPEG;
+  if (config_.format == "png")
+    encodingFormat = PNG;
+
+  if (encodingFormat == UNDEFINED)
+    ROS_ERROR("Unknown compression type '%s', valid options are 'jpeg' and 'png'", config_.format.c_str());
+
+  // Bit depth of image encoding
+  int bitDepth = enc::bitDepth(message.encoding);
+  int numChannels = enc::numChannels(message.encoding);
+
+  switch (encodingFormat)
   {
-    params[0] = CV_IMWRITE_JPEG_QUALITY;
-    params[1] = config_.jpeg_quality;
-
-    // OpenCV-ros bridge
-    cv_bridge::CvImagePtr cv_ptr;
-    cv_ptr = cv_bridge::toCvCopy(message);
-
-    // Check input format
-    if (((cv_ptr->image.channels() == 1) || (cv_ptr->image.channels() == 3))
-        &&    ((cv_ptr->image.depth() == CV_8U)
-            || (cv_ptr->image.depth() == CV_8S)
-            || (cv_ptr->image.depth() == CV_16U)
-            || (cv_ptr->image.depth() == CV_16S)))
+    // JPEG Compression
+    case JPEG:
     {
+      params[0] = CV_IMWRITE_JPEG_QUALITY;
+      params[1] = config_.jpeg_quality;
 
-      // Compress image
-      if (cv::imencode(".jpg", cv_ptr->image, compressed.data, params))
+      // Update ros message format header
+      compressed.format += "; jpeg compressed";
+
+      // Check input format
+      if ((bitDepth == 8) && // JPEG only works on 8bit images
+          ((numChannels == 1) || (numChannels == 3)))
       {
 
-        float cRatio = (float)(cv_ptr->image.rows * cv_ptr->image.cols * cv_ptr->image.elemSize()) /
-                       (float)compressed.data.size();
-        ROS_DEBUG("Compressed Image Transport - Codec: jpg, Compression: 1:%.2f (%lu bytes)", cRatio, compressed.data.size());
-
-        // Publish message
-        publish_fn(compressed);
-      }
-      else
-      {
-        ROS_ERROR("cv::imencode (jpeg) failed on input image");
-      }
-    }
-    else
-      ROS_ERROR("Compressed Image Transport - JPEG compression requires 8/16-bit, 1/3-channel (with BGR channel order) images (input format is: %s)", message.encoding.c_str());
-
-  }
-  else if (config_.format == "png")
-  {
-    params[0] = CV_IMWRITE_PNG_COMPRESSION;
-    params[1] = config_.png_level;
-
-    // OpenCV-ros bridge
-    cv_bridge::CvImagePtr cv_ptr = cv_bridge::toCvCopy(message);
-
-    // Check input format
-    if (((cv_ptr->image.channels() == 1) || (cv_ptr->image.channels() == 3))
-        &&    ((cv_ptr->image.depth() == CV_8U)
-            || (cv_ptr->image.depth() == CV_8S)
-            || (cv_ptr->image.depth() == CV_16U)
-            || (cv_ptr->image.depth() == CV_16S)))
-    {
-      // Compress image
-      if (cv::imencode(".png", cv_ptr->image, compressed.data, params))
-      {
-
-        float cRatio = (float)(cv_ptr->image.rows * cv_ptr->image.cols * cv_ptr->image.elemSize())
-            / (float)compressed.data.size();
-        ROS_DEBUG(
-            "Compressed Image Transport - Codec: png, Compression: 1:%.2f (%lu bytes)", cRatio, compressed.data.size());
-
-        // Publish message
-        publish_fn(compressed);
-      }
-      else
-      {
-        ROS_ERROR("cv::imencode (png) failed on input image");
-      }
-    } else
-      ROS_ERROR("Compressed Image Transport - PNG compression requires 8/16-bit, 1/3-channel (with BGR channel order) images (input format is: %s)", message.encoding.c_str());
-  }
-  else if (config_.format == "depth")
-  {
-    params[0] = CV_IMWRITE_PNG_COMPRESSION;
-    params[1] = config_.png_level;
-
-    float depthZ0 = config_.depth_quantization;
-    float depthMax = config_.depth_max;
-
-    // OpenCV-ROS bridge
-    cv_bridge::CvImagePtr cv_ptr = cv_bridge::toCvCopy(message);
-
-    // Check input format
-    if ((cv_ptr->image.depth() == CV_32F) && (cv_ptr->image.channels() == 1))
-    {
-      const Mat& depthImg = cv_ptr->image;
-      size_t rows = cv_ptr->image.rows;
-      size_t cols = cv_ptr->image.cols;
-
-      // Allocate matrix for inverse depth (disparity) coding
-      Mat invDepthImg(rows, cols, CV_16UC1);
-
-      // Inverse depth quantization parameters
-      float depthQuantA = depthZ0 * (depthZ0 + 1.0f);
-      float depthQuantB = 1.0f - depthQuantA / depthMax;
-
-      // Matrix iterators
-      MatConstIterator_<float> itDepthImg     = depthImg.begin<float>(),
-                                itDepthImg_end = depthImg.end<float>();
-      MatIterator_<unsigned short> itInvDepthImg     = invDepthImg.begin<unsigned short>(),
-                                     itInvDepthImg_end = invDepthImg.end<unsigned short>();
-
-      // Quantization
-      for (; (itDepthImg != itDepthImg_end) && (itInvDepthImg != itInvDepthImg_end); ++itDepthImg, ++itInvDepthImg)
-      {
-        // check for NaN & max depth
-        if (*itDepthImg < depthMax)
+        // Target image format
+        stringstream targetFormat;
+        if (enc::isColor(message.encoding))
         {
-          *itInvDepthImg = depthQuantA / *itDepthImg + depthQuantB;
+          // convert color images to RGB domain
+          targetFormat << "rgb" << bitDepth;
+        }
+
+        // OpenCV-ros bridge
+        cv_bridge::CvImagePtr cv_ptr;
+        try
+        {
+          cv_ptr = cv_bridge::toCvCopy(message, targetFormat.str());
+        }
+        catch (cv_bridge::Exception& e)
+        {
+          ROS_ERROR("%s", e.what());
+        }
+
+        // Compress image
+        if (cv::imencode(".jpg", cv_ptr->image, compressed.data, params))
+        {
+
+          float cRatio = (float)(cv_ptr->image.rows * cv_ptr->image.cols * cv_ptr->image.elemSize())
+              / (float)compressed.data.size();
+          ROS_DEBUG("Compressed Image Transport - Codec: jpg, Compression: 1:%.2f (%lu bytes)", cRatio, compressed.data.size());
         }
         else
         {
-          *itInvDepthImg = 0;
+          ROS_ERROR("cv::imencode (jpeg) failed on input image");
         }
       }
+      else
+        ROS_ERROR("Compressed Image Transport - JPEG compression requires 8-bit, 1/3-channel images (input format is: %s)", message.encoding.c_str());
 
-      // Add coding parameters to data stream
-      compressed.data.resize(sizeof(float) * 2);
-      memcpy(&compressed.data[0], &depthQuantA, sizeof(float));
-      memcpy(&compressed.data[sizeof(float)], &depthQuantB, sizeof(float));
+      break;
+    }
+      // PNG Compression
+    case PNG:
+    {
+      params[0] = CV_IMWRITE_PNG_COMPRESSION;
+      params[1] = config_.png_level;
 
-      // Compress quantized disparity image
-      std::vector<uint8_t> compressedImage;
-      if (cv::imencode(".png", invDepthImg, compressedImage, params))
+      // Update ros message format header
+      compressed.format += "; png compressed";
+
+      // Check input format
+      if (((bitDepth == 16) || (bitDepth == 8)) && ((numChannels == 1) || (numChannels == 3)))
       {
-        compressed.data.insert(compressed.data.end(), compressedImage.begin(), compressedImage.end());
 
-        float cRatio = (float)(cv_ptr->image.rows * cv_ptr->image.cols * cv_ptr->image.elemSize()) /
-                        (float)compressed.data.size();
-        ROS_DEBUG("Compressed Image Transport - Codec: depth, Compression: 1:%.2f (%lu bytes)", cRatio, compressed.data.size());
+        // Target image format
+        stringstream targetFormat;
+        if (enc::isColor(message.encoding))
+        {
+          // convert color images to RGB domain
+          targetFormat << "rgb" << bitDepth;
+        }
 
-        // Publish message
-        publish_fn(compressed);
+        // OpenCV-ros bridge
+        cv_bridge::CvImagePtr cv_ptr;
+        try
+        {
+          cv_ptr = cv_bridge::toCvCopy(message, targetFormat.str());
+        }
+        catch (Exception& e)
+        {
+          ROS_ERROR("%s", e.msg.c_str());
+        }
+
+        // Compress image
+        if (cv::imencode(".png", cv_ptr->image, compressed.data, params))
+        {
+
+          float cRatio = (float)(cv_ptr->image.rows * cv_ptr->image.cols * cv_ptr->image.elemSize())
+              / (float)compressed.data.size();
+          ROS_DEBUG("Compressed Image Transport - Codec: png, Compression: 1:%.2f (%lu bytes)", cRatio, compressed.data.size());
+        }
+        else
+        {
+          ROS_ERROR("cv::imencode (png) failed on input image");
+        }
       }
       else
-      {
-        ROS_ERROR("cv::imencode (png) failed on input image");
-      }
-    } else
-      ROS_ERROR("Compressed Image Transport - Depth compression requires single-channel 32bit-floating point images (input format is: %s).", message.encoding.c_str());
+        ROS_ERROR("Compressed Image Transport - PNG compression requires 8/16-bit, 1/3-channel images (input format is: %s)", message.encoding.c_str());
+
+      break;
+    }
+
+    default:
+      break;
   }
-  else
-  {
-    ROS_ERROR("Unknown compression type '%s', valid options are 'jpeg', 'png' and 'depth'", config_.format.c_str());
-    return;
-  }
+
+  // Publish message
+  publish_fn(compressed);
 
 }
 
