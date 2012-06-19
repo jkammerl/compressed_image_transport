@@ -32,23 +32,34 @@ void CompressedSubscriber::internalCallback(const sensor_msgs::CompressedImageCo
   cv_ptr->encoding = image_encoding;
 
   // Decode color/mono image
-  cv_ptr->image = cv::imdecode(cv::Mat(message->data), CV_LOAD_IMAGE_UNCHANGED);
-
-  if (enc::isColor(image_encoding))
+  try
   {
-    // Revert color transformation
-    if ((image_encoding == enc::BGR8) || (image_encoding == enc::BGR16))
-      cv::cvtColor(cv_ptr->image, cv_ptr->image, CV_RGB2BGR);
+    cv_ptr->image = cv::imdecode(cv::Mat(message->data), CV_LOAD_IMAGE_UNCHANGED);
 
-    if ((image_encoding == enc::BGRA8) || (image_encoding == enc::BGRA16))
-      cv::cvtColor(cv_ptr->image, cv_ptr->image, CV_RGB2BGRA);
+    if (enc::isColor(image_encoding))
+    {
+      // Revert color transformation
+      if ((image_encoding == enc::BGR8) || (image_encoding == enc::BGR16))
+        cv::cvtColor(cv_ptr->image, cv_ptr->image, CV_RGB2BGR);
 
-    if ((image_encoding == enc::RGBA8) || (image_encoding == enc::RGBA16))
-      cv::cvtColor(cv_ptr->image, cv_ptr->image, CV_RGB2RGBA);
+      if ((image_encoding == enc::BGRA8) || (image_encoding == enc::BGRA16))
+        cv::cvtColor(cv_ptr->image, cv_ptr->image, CV_RGB2BGRA);
+
+      if ((image_encoding == enc::RGBA8) || (image_encoding == enc::RGBA16))
+        cv::cvtColor(cv_ptr->image, cv_ptr->image, CV_RGB2RGBA);
+    }
+  }
+  catch (cv::Exception& e)
+  {
+    ROS_ERROR("%s", e.what());
   }
 
-  // Publish message to user callback
-  user_cb(cv_ptr->toImageMsg());
+  int rows = cv_ptr->image.rows;
+  int cols = cv_ptr->image.cols;
+
+  if ((rows > 0) && (cols > 0))
+    // Publish message to user callback
+    user_cb(cv_ptr->toImageMsg());
 }
 
 } //namespace compressed_image_transport
