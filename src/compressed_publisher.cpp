@@ -55,9 +55,6 @@ void CompressedPublisher::publish(const sensor_msgs::Image& message, const Publi
   if (config_.format == "png")
     encodingFormat = PNG;
 
-  if (encodingFormat == UNDEFINED)
-    ROS_ERROR("Unknown compression type '%s', valid options are 'jpeg' and 'png'", config_.format.c_str());
-
   // Bit depth of image encoding
   int bitDepth = enc::bitDepth(message.encoding);
   int numChannels = enc::numChannels(message.encoding);
@@ -91,24 +88,27 @@ void CompressedPublisher::publish(const sensor_msgs::Image& message, const Publi
         try
         {
           cv_ptr = cv_bridge::toCvCopy(message, targetFormat.str());
+
+          // Compress image
+          if (cv::imencode(".jpg", cv_ptr->image, compressed.data, params))
+          {
+
+            float cRatio = (float)(cv_ptr->image.rows * cv_ptr->image.cols * cv_ptr->image.elemSize())
+                / (float)compressed.data.size();
+            ROS_DEBUG("Compressed Image Transport - Codec: jpg, Compression: 1:%.2f (%lu bytes)", cRatio, compressed.data.size());
+          }
+          else
+          {
+            ROS_ERROR("cv::imencode (jpeg) failed on input image");
+          }
         }
-        catch (cv_bridge::Exception& e)
+        catch (Exception& e)
         {
           ROS_ERROR("%s", e.what());
         }
 
-        // Compress image
-        if (cv::imencode(".jpg", cv_ptr->image, compressed.data, params))
-        {
-
-          float cRatio = (float)(cv_ptr->image.rows * cv_ptr->image.cols * cv_ptr->image.elemSize())
-              / (float)compressed.data.size();
-          ROS_DEBUG("Compressed Image Transport - Codec: jpg, Compression: 1:%.2f (%lu bytes)", cRatio, compressed.data.size());
-        }
-        else
-        {
-          ROS_ERROR("cv::imencode (jpeg) failed on input image");
-        }
+        // Publish message
+        publish_fn(compressed);
       }
       else
         ROS_ERROR("Compressed Image Transport - JPEG compression requires 8-bit, 1/3-channel images (input format is: %s)", message.encoding.c_str());
@@ -141,24 +141,27 @@ void CompressedPublisher::publish(const sensor_msgs::Image& message, const Publi
         try
         {
           cv_ptr = cv_bridge::toCvCopy(message, targetFormat.str());
+
+          // Compress image
+          if (cv::imencode(".png", cv_ptr->image, compressed.data, params))
+          {
+
+            float cRatio = (float)(cv_ptr->image.rows * cv_ptr->image.cols * cv_ptr->image.elemSize())
+                / (float)compressed.data.size();
+            ROS_DEBUG("Compressed Image Transport - Codec: png, Compression: 1:%.2f (%lu bytes)", cRatio, compressed.data.size());
+          }
+          else
+          {
+            ROS_ERROR("cv::imencode (png) failed on input image");
+          }
         }
         catch (Exception& e)
         {
           ROS_ERROR("%s", e.msg.c_str());
         }
 
-        // Compress image
-        if (cv::imencode(".png", cv_ptr->image, compressed.data, params))
-        {
-
-          float cRatio = (float)(cv_ptr->image.rows * cv_ptr->image.cols * cv_ptr->image.elemSize())
-              / (float)compressed.data.size();
-          ROS_DEBUG("Compressed Image Transport - Codec: png, Compression: 1:%.2f (%lu bytes)", cRatio, compressed.data.size());
-        }
-        else
-        {
-          ROS_ERROR("cv::imencode (png) failed on input image");
-        }
+        // Publish message
+        publish_fn(compressed);
       }
       else
         ROS_ERROR("Compressed Image Transport - PNG compression requires 8/16-bit, 1/3-channel images (input format is: %s)", message.encoding.c_str());
@@ -167,11 +170,9 @@ void CompressedPublisher::publish(const sensor_msgs::Image& message, const Publi
     }
 
     default:
-      break;
+      ROS_ERROR("Unknown compression type '%s', valid options are 'jpeg' and 'png'", config_.format.c_str());
+      break;q
   }
-
-  // Publish message
-  publish_fn(compressed);
 
 }
 
