@@ -104,11 +104,11 @@ void CompressedPublisher::publish(const sensor_msgs::Image& message, const Publi
         }
         catch (cv_bridge::Exception& e)
         {
-          ROS_ERROR("%s", e.msg.c_str());
+          ROS_ERROR("%s", e.what());
         }
         catch (cv::Exception& e)
         {
-          ROS_ERROR("%s", e.msg.c_str());
+          ROS_ERROR("%s", e.what());
         }
 
         // Publish message
@@ -161,11 +161,11 @@ void CompressedPublisher::publish(const sensor_msgs::Image& message, const Publi
         }
         catch (cv_bridge::Exception& e)
         {
-          ROS_ERROR("%s", e.msg.c_str());
+          ROS_ERROR("%s", e.what());
         }
         catch (cv::Exception& e)
         {
-          ROS_ERROR("%s", e.msg.c_str());
+          ROS_ERROR("%s", e.what());
         }
 
         // Publish message
@@ -178,7 +178,7 @@ void CompressedPublisher::publish(const sensor_msgs::Image& message, const Publi
 
     default:
       ROS_ERROR("Unknown compression type '%s', valid options are 'jpeg' and 'png'", config_.format.c_str());
-      break;q
+      break;
   }
 
 }
