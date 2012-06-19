@@ -102,9 +102,13 @@ void CompressedPublisher::publish(const sensor_msgs::Image& message, const Publi
             ROS_ERROR("cv::imencode (jpeg) failed on input image");
           }
         }
-        catch (Exception& e)
+        catch (cv_bridge::Exception& e)
         {
-          ROS_ERROR("%s", e.what());
+          ROS_ERROR("%s", e.msg.c_str());
+        }
+        catch (cv::Exception& e)
+        {
+          ROS_ERROR("%s", e.msg.c_str());
         }
 
         // Publish message
@@ -155,7 +159,11 @@ void CompressedPublisher::publish(const sensor_msgs::Image& message, const Publi
             ROS_ERROR("cv::imencode (png) failed on input image");
           }
         }
-        catch (Exception& e)
+        catch (cv_bridge::Exception& e)
+        {
+          ROS_ERROR("%s", e.msg.c_str());
+        }
+        catch (cv::Exception& e)
         {
           ROS_ERROR("%s", e.msg.c_str());
         }
@@ -165,7 +173,6 @@ void CompressedPublisher::publish(const sensor_msgs::Image& message, const Publi
       }
       else
         ROS_ERROR("Compressed Image Transport - PNG compression requires 8/16-bit, 1/3-channel images (input format is: %s)", message.encoding.c_str());
-
       break;
     }
 

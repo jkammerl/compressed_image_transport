@@ -54,8 +54,8 @@ void CompressedSubscriber::internalCallback(const sensor_msgs::CompressedImageCo
     ROS_ERROR("%s", e.what());
   }
 
-  int rows = cv_ptr->image.rows;
-  int cols = cv_ptr->image.cols;
+  size_t rows = cv_ptr->image.rows;
+  size_t cols = cv_ptr->image.cols;
 
   if ((rows > 0) && (cols > 0))
     // Publish message to user callback
