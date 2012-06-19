@@ -2,7 +2,7 @@
   <description brief="compressed_image_transport">
 
      compressed_image_transport provides a plugin to image_transport for transparently sending images
-     encoded as JPEG, PNG or compressed depth map.
+     encoded as JPEG or PNG.
 
   </description>
   <author>Patrick Mihelich, Julius Kammerl</author>
